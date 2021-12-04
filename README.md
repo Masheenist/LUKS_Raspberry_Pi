@@ -1,2 +1,2 @@
 # LUKS_Raspberry_Pi
-Detailed guide on encrypting a Raspberry Pi
+Detailed guide on encrypting a Raspberry Pi, adapted from https://rr-developer.github.io/LUKS-on-Raspberry-Pi/ because there were difficulties going through that walkthrough due to a missing library. That library has been added as well as other information to help people who aren't very familiar with Linux or Ubuntu or new to Raspberry Pis. I will add images and make this easier to follow visually soon.

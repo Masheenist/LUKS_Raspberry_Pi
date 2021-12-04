@@ -1,0 +1,104 @@
+Adapted from https://rr-developer.github.io/LUKS-on-Raspberry-Pi/ and https://githubmemory.com/repo/rr-developer/LUKS-on-Raspberry-Pi/issues/2
+
+You will need a Raspberry Pi (I used the Raspberry Pi 4 Model B 8GB), a micro SD card, another micro SD card or a USB stick, a micro SD Reader, a monitor (optional), a keyboard (optional), and a computer with Ubuntu
+
+1. Go to https://www.raspberrypi.com/software/operating-systems/ and download the Raspberry Pi OS Lite.
+2. Go to https://www.balena.io/etcher/ and download Balena Etcher (or some other Flash software).
+3. Put a microSD card in the micro SD reader and plug it into a USB port on your computer.
+4. Open Balena Etcher, select Flash from file, select the Raspberry Pi lite zip file. Then select the USB as a target. Click Flash.
+5. Now you can either remove the micro SD card and place it in the Pi, connect the Pi to the extra monitor and keyboard or modify the files on the microSD card.
+6. On the Pi, first add a wireless network. First type in the default username Pi and the default password Raspberry. 
+7. Then you can type sudo raspi-config which will take you to the configuration menu. Select 1 System Options.
+8. Select S1 Wireless LAN and input your networks name under SSID and password under passphrase.
+9. Select S3 Password and change the default password to one of your choosing (write it down).
+10. (Optional) Select S4 Hostname and change the default Pi name to something awesome.
+11. Go back a menu and enable SSH by going to 3 Interface Options.
+12. Select P2 SSH to be able to remotely connect to your Pi.
+13. Go back to the main menu and then select Finish to reboot the Pi.
+14. Type ifconfig to find out your Pi's IP address. It should be the inet number listed under wlan.
+15. At this point you can unplug the Pi from the monitor and keyboard if you used those and open up a terminal on your main computer.
+16. Type ssh pi@<IP address> and repleace <IP address> with the number you got in step 10. 
+17. It probably tell you that the authenticity of the host can't be established. Just type yes and hit enter.
+18. Type in the password you entered in step 13. You should be remotely connected to your Pi.
+19. uname -s -r Check that you have Linux kernel 5.0 or later. If not get a newer version.
+20. cryptsetup --version The lite OS doesn't have cryptsetup so type sudo apt install busybox cryptsetup initramfs-tools
+21. cryptsetup benchmark -c xchacha20,aes-adiantum-plain64 to check that cryptsetup is now working
+22. sudo nano /etc/kernel/postinst.d/initramfs-rebuild (You can use vi or another built in editor as well).
+23. Copy and paste this into the newly created file, then press ctrl X, type Y, and press enter to save and exit:
+#!/bin/sh -e
+
+# Rebuild initramfs.gz after kernel upgrade to include new kernel's modules.
+# https://github.com/Robpol86/robpol86.com/blob/master/docs/_static/initramfs-rebuild.sh
+# Save as (chmod +x): /etc/kernel/postinst.d/initramfs-rebuild
+
+# Remove splash from cmdline.
+if grep -q '\bsplash\b' /boot/cmdline.txt; then
+  sed -i 's/ \?splash \?/ /' /boot/cmdline.txt
+fi
+
+# Exit if not building kernel for this Raspberry Pi's hardware version.
+version="$1"
+current_version="$(uname -r)"
+case "${current_version}" in
+  *-v7+)
+    case "${version}" in
+      *-v7+) ;;
+      *) exit 0
+    esac
+  ;;
+  *+)
+    case "${version}" in
+      *-v7+) exit 0 ;;
+    esac
+  ;;
+esac
+
+# Exit if rebuild cannot be performed or not needed.
+[ -x /usr/sbin/mkinitramfs ] || exit 0
+[ -f /boot/initramfs.gz ] || exit 0
+lsinitramfs /boot/initramfs.gz |grep -q "/$version$" && exit 0  # Already in initramfs.
+
+# Rebuild.
+mkinitramfs -o /boot/initramfs.gz "$version"
+24. sudo chmod +x /etc/kernel/postinst.d/initramfs-rebuild
+24. sudo chmod +x /etc/initramfs-tools/hooks/luks_hooks
+25. sudo nano /etc/initramfs-tools/modules
+26. Copy and paste this at the end of the file.
+algif_skcipher
+xchacha20
+adiantum
+aes_arm
+sha256
+nhpoly1305
+dm-crypt
+27. sudo -E CRYPTSETUP=y mkinitramfs -o /boot/initramfs.gz
+28. lsinitramfs /boot/initramfs.gz | grep -P "sbin/(cryptsetup|resize2fs|fdisk)"
+29. sudo nano /boot/config.txt
+30. Copy/paste this to the end of the file initramfs initramfs.gz followkernel
+31. sudo nano /boot/cmdline.txt
+32. Replace the root="" with root=/dev/mapper/sdcard and add this to the end of the file cryptdevice=/dev/mmcblk0p2:sdcard
+33. sudo nano /etc/fstab
+34. Replace with whatever root (for example /dev/mmcblk0p2) is with /dev/mapper/sdcard
+35. sudo nano /etc/crypttab
+36. Copy/paste sdcard	/dev/mmcblk0p2	none	luks
+37. If you are SSH'd into the Pi at this point you will need to have it plugged in again into the monitor because after you reboot it will enter the initramfs shell.
+38. Sudo reboot
+39. cryptsetup benchmark -c xchacha20,aes-adiantum-plain64
+40. e2fsck -f /dev/mmcblk0p2
+41. resize2fs -fM -p /dev/mmcblk0p2 Take note of the size of the filesystem, you will use it wherever the directions say XXXXX
+42. time dd bs=4k count=XXXXX if=/dev/mmcblk0p2 | sha1sum
+43. Insert the other mini SD card in the reader or the USB stick into the Pi
+43. fdisk -l /dev/sda
+44. time dd bs=4k count=XXXXX if=/dev/mmcblk0p2 of=/dev/sda
+45. time dd bs=4k count=XXXXX if=/dev/sda | sha1sum
+46. cryptsetup --type luks2 --cipher xchacha20,aes-adiantum-plain64 --hash sha256 --iter-time 5000 --pbkdf argon2i luksFormat /dev/mmcblk0p2 Type capital YES and then your passphrase twice
+47. cryptsetup luksOpen /dev/mmcblk0p2 sdcard
+48. time dd bs=4k count=XXXXX if=/dev/sda of=/dev/mapper/sdcard
+49. time dd bs=4k count=XXXXX if=/dev/mapper/sdcard | sha1sum
+50. e2fsck -f /dev/mapper/sdcard
+51. resize2fs -f /dev/mapper/sdcard
+52. exit
+53. cryptsetup luksOpen /dev/mmcblk0p2 sdcard
+54. exit
+55. sudo mkinitramfs -o /tmp/initramfs.gz
+56. sudo cp /tmp/initramfs.gz /boot/initramfs.gz
